@@ -31,7 +31,10 @@ jobs:
       - name: Install
         run: npm ci
 
-      - name: Unit tests
+      - name: Type check
+        run: npx tsc -b
+
+      - name: Unit tests (+ SQL 검증)
         run: npm test
 
       - name: Check source for secrets
@@ -42,7 +45,6 @@ jobs:
           VITE_SUPABASE_URL: ${{ vars.VITE_SUPABASE_URL }}
           VITE_SUPABASE_PUBLISHABLE_KEY: ${{ vars.VITE_SUPABASE_PUBLISHABLE_KEY }}
           VITE_OWNER_EMAIL: ${{ vars.VITE_OWNER_EMAIL }}
-          VITE_TURNSTILE_SITE_KEY: ${{ vars.VITE_TURNSTILE_SITE_KEY }}
         run: npm run build
 
       - name: Check build output for secrets

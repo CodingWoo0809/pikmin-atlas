@@ -10,6 +10,7 @@
 |---|---|---|
 | 2026-10-09 | v1.0 | 사용자 확정 사항 반영: 비밀번호 복구 B 방식, Turnstile 적용, iPhone 4열, 자동 일시정지 수동 재개(핑 없음), 별도 Organization |
 | 2026-10-09 | v1.0.1 | 저장소 이름 `pikmin-atlas`로 확정, 2-1 완료 표시 |
+| 2026-10-09 | v1.1 | **Turnstile 사용 안 함**(사용자 결정). 대신 `private.app_owner` 표로 주인 계정 1개만 지정해 RLS·Storage 정책에 함께 적용(가입이 실수로 열려도 다른 계정은 접근 불가). 데코 분류에 이모지 아이콘(`icon`) 추가. 복원 스냅숏에 `cancelled` 상태·`restored_photo_paths` 추가. 4~6단계 구현 |
 
 ---
 
@@ -28,7 +29,7 @@
 | 주소 방식 | Hash Routing (`/#/...`) | GitHub Pages 새로고침 404 방지 |
 | 배포 | GitHub Pages (GitHub Actions로 자동 빌드·배포) | 무료 계정 → **공개 저장소** |
 | 인증 | Supabase Auth (이메일+비밀번호 계정 1개) | 화면에는 비밀번호 칸만 |
-| 로봇 차단 | Cloudflare Turnstile (보이지 않는 모드) | Supabase CAPTCHA 연동 |
+| 로봇 차단 | ~~Cloudflare Turnstile~~ 사용 안 함 (v1.1) | Supabase 기본 로그인 시도 제한 + 주인 지정 표 |
 | DB | Supabase Postgres + RLS | 새 Organization의 새 프로젝트, 지역 Seoul |
 | 사진 | Supabase Storage 비공개 버킷 + 만료되는 Signed URL | |
 | 라이브러리 | `@supabase/supabase-js`, `fflate`(ZIP), `papaparse`(CSV), `zod`(검증) | 사진 압축은 Canvas API |
@@ -253,10 +254,10 @@ Nomad-atlas-backup-YYYY-MM-DD_HHMM.zip
 
 ### 2단계 인프라 설정
 - [x] 2-1 GitHub 저장소 생성 (공개, `pikmin-atlas`)
-- [ ] 2-1b 준비한 코드 첫 업로드
+- [x] 2-1b 준비한 코드 첫 업로드
 - [ ] 2-2 Supabase 새 Organization·프로젝트 생성 (Free, Seoul)
 - [ ] 2-3 Supabase Auth 설정 (가입 차단, 익명 끔, 최소 6자, 필수 문자 없음, 안전한 비밀번호 변경 끔)
-- [ ] 2-4 Cloudflare Turnstile 위젯 생성 + Supabase CAPTCHA 연결
+- [x] ~~2-4 Turnstile~~ 사용 안 함 (v1.1)
 - [ ] 2-5 GitHub Pages 배포 설정 (Actions)
 - [ ] 2-6 환경 변수 등록 (Variables 4개) + 비밀 키 노출 검사
 - [ ] 2-7 초기 마이그레이션 실행 (표, RLS, 비공개 버킷, Storage 정책)
@@ -264,19 +265,19 @@ Nomad-atlas-backup-YYYY-MM-DD_HHMM.zip
 - [ ] 2-9 확인: 배포 주소 접속, 비로그인 상태에서 표·사진 접근 거부
 
 ### 3단계 인증·보안
-- [ ] 로그인·최초 설정·변경·로그아웃 화면
-- [ ] Turnstile 연동, 오류 메시지
+- [x] 로그인·최초 설정·변경·로그아웃 화면 (코드 완료, 실제 Supabase 연결 확인 전)
+- [x] 오류 메시지 구분 (Turnstile 제외)
 - [ ] 복구 SQL 실제 검증 및 운영 문서화
 - [ ] 비로그인 접근 차단·로그인 시도 제한 테스트
 
 ### 4단계 핵심 도감
-- [ ] 메인·카테고리, 장소 추가·수정·삭제, 좌표 복사, 데코 분류, 반응형
+- [x] 메인·카테고리, 장소 추가·수정·삭제, 좌표 복사, 데코 분류, 반응형 (가짜 서버로 브라우저 확인)
 
 ### 5단계 사진·즐겨찾기
-- [ ] 압축 업로드·썸네일·Signed URL, 즐겨찾기, 정렬·필터·검색
+- [x] 압축 업로드·썸네일·Signed URL, 즐겨찾기, 정렬·필터·검색 (실제 iPhone 업로드 확인 전)
 
 ### 6단계 데이터 관리
-- [ ] CSV·JSON 가져오기(+형식 문서·샘플), ZIP 백업·복원·되돌리기, 휴지통, 저장공간 정리
+- [x] CSV·JSON 가져오기(+형식 문서·샘플), ZIP 백업·복원·되돌리기, 휴지통, 저장공간 정리 (로직 테스트 완료, 실제 서버 확인 전)
 
 ### 7단계 종합 테스트
 - [ ] 요구사항 테스트 목록 전체

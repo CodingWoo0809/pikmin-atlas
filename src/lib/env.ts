@@ -1,11 +1,11 @@
 // 빌드할 때 주입되는 "공개해도 되는 값"만 읽는다.
 // 비밀 키가 실수로 들어오면 앱을 아예 시작하지 않도록 막는다.
+// (Turnstile은 사용하지 않기로 해서 설정값은 3개다.)
 
 export type AppConfig = {
   supabaseUrl: string;
   supabasePublishableKey: string;
   ownerEmail: string;
-  turnstileSiteKey: string;
 };
 
 export type ConfigResult =
@@ -39,8 +39,7 @@ export function readConfig(env: RawEnv): ConfigResult {
 
   const supabaseUrl = get('VITE_SUPABASE_URL');
   const supabasePublishableKey = get('VITE_SUPABASE_PUBLISHABLE_KEY');
-  const ownerEmail = get('VITE_OWNER_EMAIL');
-  const turnstileSiteKey = get('VITE_TURNSTILE_SITE_KEY');
+  const ownerEmail = get('VITE_OWNER_EMAIL').toLowerCase();
 
   if (!/^https:\/\/[a-z0-9-]+\.supabase\.co\/?$/.test(supabaseUrl)) {
     problems.push('VITE_SUPABASE_URL 값이 없거나 https://xxxx.supabase.co 형식이 아닙니다.');
@@ -55,9 +54,6 @@ export function readConfig(env: RawEnv): ConfigResult {
   if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(ownerEmail)) {
     problems.push('VITE_OWNER_EMAIL 값이 없거나 이메일 형식이 아닙니다.');
   }
-  if (!turnstileSiteKey) {
-    problems.push('VITE_TURNSTILE_SITE_KEY 값이 없습니다.');
-  }
 
   if (problems.length > 0) return { ok: false, problems };
   return {
@@ -66,7 +62,6 @@ export function readConfig(env: RawEnv): ConfigResult {
       supabaseUrl: supabaseUrl.replace(/\/$/, ''),
       supabasePublishableKey,
       ownerEmail,
-      turnstileSiteKey,
     },
   };
 }

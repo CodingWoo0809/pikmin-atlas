@@ -5,7 +5,6 @@ const good = {
   VITE_SUPABASE_URL: 'https://abcdefgh.supabase.co',
   VITE_SUPABASE_PUBLISHABLE_KEY: 'sb_publishable_test123',
   VITE_OWNER_EMAIL: 'owner@nomad-atlas.invalid',
-  VITE_TURNSTILE_SITE_KEY: '0x4AAAAAAAtest',
 };
 
 function fakeJwt(payload: object) {
@@ -22,7 +21,11 @@ describe('readConfig', () => {
   it('값이 비어 있으면 문제 목록을 돌려준다', () => {
     const r = readConfig({});
     expect(r.ok).toBe(false);
-    if (!r.ok) expect(r.problems.length).toBe(4);
+    if (!r.ok) expect(r.problems.length).toBe(3);
+  });
+
+  it('Turnstile 값이 없어도 통과한다', () => {
+    expect(readConfig({ ...good }).ok).toBe(true);
   });
 
   it('sb_secret_ 키가 들어오면 거부한다', () => {
