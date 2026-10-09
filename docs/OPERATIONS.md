@@ -37,7 +37,7 @@
   - `VITE_OWNER_EMAIL` = 주인 계정 이메일
   - (이전에 만든 `VITE_TURNSTILE_SITE_KEY`는 더 이상 쓰지 않으므로 지워도 됩니다)
 - **Settings → Pages → Source = GitHub Actions**
-- `main`에 올리면 자동으로 타입 검사 → 테스트(SQL 검증 포함) → 비밀 키 검사 → 빌드 → 배포됩니다. **Actions** 탭에서 초록색 체크가 보이면 성공.
+- `main`에 올리면 자동으로 테스트(SQL 검증 포함) → 비밀 키 검사 → 빌드(타입 검사 포함) → 배포됩니다. **Actions** 탭에서 초록색 체크가 보이면 성공.
 
 ## 3. 비밀번호를 잊었을 때 (복구)
 1. Supabase 대시보드 → 프로젝트 → **SQL Editor → New query**
