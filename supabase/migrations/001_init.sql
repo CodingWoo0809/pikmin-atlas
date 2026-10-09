@@ -1,8 +1,17 @@
 -- =====================================================================
--- Pikmin Atlas (Nomad Atlas) — 초기 데이터베이스 구성
+-- Pikmin Atlas (Nomad Atlas) — 초기 데이터베이스 구성 (v2: 삭제 명령 없는 안전 버전)
 --   실행 위치: Supabase 대시보드 → SQL Editor → New query → 전체 붙여넣기 → Run
---   여러 번 실행해도 안전하도록(이미 있으면 건너뛰거나 다시 만듦) 작성했다.
 --   이 파일에는 비밀 정보가 없다. 공개 저장소에 있어도 된다.
+--
+--   설치 시점에 실행되는 명령에는 DROP / TRUNCATE / DELETE / UPDATE 가 하나도 없다.
+--     · 표·색인·스키마: "없을 때만 만들기" (if not exists)
+--     · 트리거·함수: create or replace (같은 이름을 같은 정의로 다시 만들 뿐, 데이터와 무관)
+--     · 접근 정책: 이미 있으면 건너뛰기 (지우고 다시 만들지 않음)
+--     · 사진 버킷: 없을 때만 만들기. 이미 있는데 공개(public) 상태면 설치를 중단(오류)한다.
+--   아래 "5. 서버 함수"의 본문에 있는 delete/update 는 앱이 호출할 때만 실행되는
+--   기능(휴지통 영구 삭제, 복원 등)이며, 이 SQL을 실행하는 순간에는 실행되지 않는다.
+--   주인 계정(auth.users)을 삭제해도 도감 데이터가 함께 지워지지 않도록 모든 연결은
+--   on delete restrict(데이터가 있으면 계정 삭제를 거부)로 둔다.
 -- =====================================================================
 
 -- ---------------------------------------------------------------------
@@ -12,10 +21,13 @@ create schema if not exists private;
 
 -- 주인 계정은 딱 1명. singleton 열이 항상 true + unique 이므로 행이 2개가 될 수 없다.
 create table if not exists private.app_owner (
-  user_id   uuid primary key references auth.users (id) on delete cascade,
+  user_id   uuid primary key references auth.users (id) on delete restrict,
   singleton boolean not null default true unique check (singleton)
 );
+-- 이중 보호: API 역할에서 표 권한을 모두 빼고, RLS도 켠다(정책 없음 = API 역할은 한 행도 못 봄).
+-- 아래 is_owner()는 표 소유자 권한(security definer)으로 실행되므로 RLS와 무관하게 확인할 수 있다.
 revoke all on private.app_owner from public, anon, authenticated;
+alter table private.app_owner enable row level security;
 
 -- 지금 로그인한 사람이 주인인가? (가입이 실수로 열려도 다른 계정은 아무것도 못 한다)
 create or replace function private.is_owner()
@@ -35,7 +47,7 @@ grant execute on function private.is_owner() to authenticated;
 -- 1. 표
 -- ---------------------------------------------------------------------
 create table if not exists public.owner_settings (
-  owner_id             uuid primary key default auth.uid() references auth.users (id) on delete cascade,
+  owner_id             uuid primary key default auth.uid() references auth.users (id) on delete restrict,
   password_initialized boolean not null default false,
   last_backup_at       timestamptz,
   schema_version       integer not null default 1,
@@ -44,7 +56,7 @@ create table if not exists public.owner_settings (
 
 create table if not exists public.photos (
   id          uuid primary key default gen_random_uuid(),
-  owner_id    uuid not null default auth.uid() references auth.users (id) on delete cascade,
+  owner_id    uuid not null default auth.uid() references auth.users (id) on delete restrict,
   kind        text not null check (kind in ('place', 'icon')),
   path        text not null,
   thumb_path  text,
@@ -57,7 +69,7 @@ create table if not exists public.photos (
 
 create table if not exists public.deco_categories (
   id             uuid primary key default gen_random_uuid(),
-  owner_id       uuid not null default auth.uid() references auth.users (id) on delete cascade,
+  owner_id       uuid not null default auth.uid() references auth.users (id) on delete restrict,
   name           text not null check (char_length(name) between 1 and 50 and name = btrim(name)),
   icon           text not null default '' check (char_length(icon) <= 16),
   icon_photo_id  uuid references public.photos (id) on delete restrict,
@@ -74,8 +86,9 @@ create unique index if not exists deco_categories_name_unique
 
 create table if not exists public.places (
   id                uuid primary key default gen_random_uuid(),
-  owner_id          uuid not null default auth.uid() references auth.users (id) on delete cascade,
+  owner_id          uuid not null default auth.uid() references auth.users (id) on delete restrict,
   category          text not null check (category in ('mushroom', 'bigflower', 'deco')),
+  -- 분류를 '영구 삭제'하면 소속 장소는 지워지지 않고 미분류(null)가 된다
   deco_category_id  uuid references public.deco_categories (id) on delete set null,
   name              text not null check (char_length(name) between 1 and 100 and name = btrim(name)),
   description       text not null default '' check (char_length(description) <= 2000),
@@ -97,7 +110,7 @@ create index if not exists places_deco_category on public.places (deco_category_
 
 create table if not exists public.restore_snapshots (
   id          uuid primary key default gen_random_uuid(),
-  owner_id    uuid not null default auth.uid() references auth.users (id) on delete cascade,
+  owner_id    uuid not null default auth.uid() references auth.users (id) on delete restrict,
   created_at  timestamptz not null default now(),
   status      text not null default 'pending'
               check (status in ('pending', 'committed', 'rolled_back', 'finalized', 'cancelled')),
@@ -120,16 +133,16 @@ begin
 end;
 $$;
 
-drop trigger if exists places_touch on public.places;
-create trigger places_touch before update on public.places
+-- create or replace trigger: 지우지 않고 같은 정의로 만들거나 교체 (Postgres 14 이상)
+create or replace trigger places_touch before update on public.places
   for each row execute function public.touch_row();
 
-drop trigger if exists deco_categories_touch on public.deco_categories;
-create trigger deco_categories_touch before update on public.deco_categories
+create or replace trigger deco_categories_touch before update on public.deco_categories
   for each row execute function public.touch_row();
 
 -- ---------------------------------------------------------------------
 -- 3. 권한: 비로그인(anon)에게는 표 권한 자체를 주지 않는다
+--    (revoke 는 '권한 빼기'일 뿐 데이터를 지우지 않는다)
 -- ---------------------------------------------------------------------
 revoke all on public.owner_settings, public.photos, public.deco_categories,
               public.places, public.restore_snapshots from anon, public;
@@ -151,16 +164,18 @@ alter table public.deco_categories   enable row level security;
 alter table public.places            enable row level security;
 alter table public.restore_snapshots enable row level security;
 
--- 표마다 같은 규칙: 로그인한 주인 본인 행만 읽기·쓰기
+-- 표마다 같은 규칙: 로그인한 주인 본인 행만 읽기·쓰기. 이미 있으면 건너뛴다.
 do $$
 declare t text;
 begin
   foreach t in array array['owner_settings','photos','deco_categories','places','restore_snapshots'] loop
-    execute format('drop policy if exists owner_all on public.%I', t);
-    execute format(
-      'create policy owner_all on public.%I for all to authenticated
-         using (owner_id = (select auth.uid()) and (select private.is_owner()))
-         with check (owner_id = (select auth.uid()) and (select private.is_owner()))', t);
+    if not exists (select 1 from pg_policies
+                    where schemaname = 'public' and tablename = t and policyname = 'owner_all') then
+      execute format(
+        'create policy owner_all on public.%I for all to authenticated
+           using (owner_id = (select auth.uid()) and (select private.is_owner()))
+           with check (owner_id = (select auth.uid()) and (select private.is_owner()))', t);
+    end if;
   end loop;
 end $$;
 
@@ -169,35 +184,35 @@ end $$;
 -- ---------------------------------------------------------------------
 insert into storage.buckets (id, name, public, file_size_limit, allowed_mime_types)
 values ('nomad-private', 'nomad-private', false, 5242880, array['image/jpeg', 'image/png'])
-on conflict (id) do update
-  set public = false,
-      file_size_limit = excluded.file_size_limit,
-      allowed_mime_types = excluded.allowed_mime_types;
+on conflict (id) do nothing;
 
-drop policy if exists "nomad owner read"   on storage.objects;
-drop policy if exists "nomad owner insert" on storage.objects;
-drop policy if exists "nomad owner update" on storage.objects;
-drop policy if exists "nomad owner delete" on storage.objects;
+-- 같은 이름의 버킷이 이미 공개(public)로 있으면 몰래 바꾸지 않고 설치를 멈춘다
+do $$
+begin
+  if exists (select 1 from storage.buckets where id = 'nomad-private' and public) then
+    raise exception 'nomad-private 버킷이 공개(public) 상태입니다. Storage에서 비공개로 바꾼 뒤 다시 실행하세요.';
+  end if;
+end $$;
 
-create policy "nomad owner read" on storage.objects for select to authenticated
-  using (bucket_id = 'nomad-private'
+do $$
+declare
+  cond text := $c$bucket_id = 'nomad-private'
          and (storage.foldername(name))[1] = (select auth.uid())::text
-         and (select private.is_owner()));
-create policy "nomad owner insert" on storage.objects for insert to authenticated
-  with check (bucket_id = 'nomad-private'
-         and (storage.foldername(name))[1] = (select auth.uid())::text
-         and (select private.is_owner()));
-create policy "nomad owner update" on storage.objects for update to authenticated
-  using (bucket_id = 'nomad-private'
-         and (storage.foldername(name))[1] = (select auth.uid())::text
-         and (select private.is_owner()))
-  with check (bucket_id = 'nomad-private'
-         and (storage.foldername(name))[1] = (select auth.uid())::text
-         and (select private.is_owner()));
-create policy "nomad owner delete" on storage.objects for delete to authenticated
-  using (bucket_id = 'nomad-private'
-         and (storage.foldername(name))[1] = (select auth.uid())::text
-         and (select private.is_owner()));
+         and (select private.is_owner())$c$;
+begin
+  if not exists (select 1 from pg_policies where schemaname = 'storage' and tablename = 'objects' and policyname = 'nomad owner read') then
+    execute format('create policy "nomad owner read" on storage.objects for select to authenticated using (%s)', cond);
+  end if;
+  if not exists (select 1 from pg_policies where schemaname = 'storage' and tablename = 'objects' and policyname = 'nomad owner insert') then
+    execute format('create policy "nomad owner insert" on storage.objects for insert to authenticated with check (%s)', cond);
+  end if;
+  if not exists (select 1 from pg_policies where schemaname = 'storage' and tablename = 'objects' and policyname = 'nomad owner update') then
+    execute format('create policy "nomad owner update" on storage.objects for update to authenticated using (%s) with check (%s)', cond, cond);
+  end if;
+  if not exists (select 1 from pg_policies where schemaname = 'storage' and tablename = 'objects' and policyname = 'nomad owner delete') then
+    execute format('create policy "nomad owner delete" on storage.objects for delete to authenticated using (%s)', cond);
+  end if;
+end $$;
 
 -- ---------------------------------------------------------------------
 -- 5. 서버 함수 (모두 SECURITY INVOKER → 위 RLS가 그대로 적용됨)

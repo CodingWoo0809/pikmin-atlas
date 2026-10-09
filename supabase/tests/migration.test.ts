@@ -230,3 +230,90 @@ describe('복원과 되돌리기', () => {
     expect((await q<{ current_atlas_json: { places: unknown[] } }>('select public.current_atlas_json()'))[0].current_atlas_json.places).toEqual([]);
   });
 });
+
+describe('설치 SQL 자체의 안전성', () => {
+  const sql = () => readFileSync(new URL('../migrations/001_init.sql', import.meta.url), 'utf8');
+
+  it('설치 시점에 실행되는 문장에 DROP/TRUNCATE/DELETE/UPDATE/CASCADE가 없다 (함수 본문 제외)', () => {
+    // $$ ... $$ 함수 본문과 주석을 걷어낸 나머지만 검사
+    const outside = sql()
+      .replace(/--[^\n]*/g, '')
+      .replace(/\$\$[\s\S]*?\$\$/g, '')
+      .replace(/\$c\$[\s\S]*?\$c\$/g, '');
+    expect(outside).not.toMatch(/\b(drop|truncate)\b/i);
+    expect(outside).not.toMatch(/^\s*(delete|update)\b/im);
+    expect(outside).not.toMatch(/on\s+delete\s+cascade/i);
+    expect(outside).not.toMatch(/do\s+update/i);
+  });
+
+  it('기존 데이터가 있는 상태에서 다시 실행해도 데이터·정책이 그대로다', async () => {
+    await as('postgres');
+    const snapshot = async () =>
+      JSON.stringify(await q(`select (select json_agg(p order by id) from public.places p) a,
+                                     (select json_agg(c order by id) from public.deco_categories c) b,
+                                     (select json_agg(ph order by id) from public.photos ph) c,
+                                     (select json_agg(s order by id) from public.restore_snapshots s) d,
+                                     (select count(*) from private.app_owner) e,
+                                     (select count(*) from storage.objects) f`));
+    const before = await snapshot();
+    const policiesBefore = await q(`select schemaname, tablename, policyname, qual, with_check from pg_policies order by 1,2,3`);
+    await db.exec(sql());
+    await as('postgres');
+    expect(await snapshot()).toBe(before);
+    expect(await q(`select schemaname, tablename, policyname, qual, with_check from pg_policies order by 1,2,3`)).toEqual(policiesBefore);
+  });
+
+  it('모든 관련 표에 RLS가 켜져 있고, 정책이 빠짐없이 있다', async () => {
+    await as('postgres');
+    const rls = await q<{ t: string; rls_on: boolean }>(
+      `select n.nspname || '.' || c.relname t, c.relrowsecurity rls_on from pg_class c join pg_namespace n on n.oid = c.relnamespace
+        where (n.nspname, c.relname) in (('private','app_owner'),('public','owner_settings'),('public','photos'),
+              ('public','deco_categories'),('public','places'),('public','restore_snapshots')) order by 1`);
+    expect(rls).toHaveLength(6);
+    expect(rls.every((r) => r.rls_on)).toBe(true);
+    const pol = await q<{ tablename: string; policyname: string; roles: string }>(
+      `select tablename, policyname, roles::text from pg_policies where schemaname in ('public','storage','private') order by 1,2`);
+    for (const t of ['deco_categories', 'owner_settings', 'photos', 'places', 'restore_snapshots']) {
+      expect(pol.find((p) => p.tablename === t && p.policyname === 'owner_all')?.roles).toBe('{authenticated}');
+    }
+    expect(pol.filter((p) => p.tablename === 'objects' && p.policyname.startsWith('nomad owner'))).toHaveLength(4);
+    expect(pol.some((p) => p.tablename === 'app_owner')).toBe(false); // 정책 없음 = API로는 접근 불가
+  });
+
+  it('API 역할은 app_owner를 직접 읽을 수 없다', async () => {
+    await as('authenticated', OWNER);
+    await expect(q('select * from private.app_owner')).rejects.toThrow(/permission denied/);
+    await as('anon');
+    await expect(q('select * from private.app_owner')).rejects.toThrow(/permission denied/);
+    await expect(q('select private.is_owner()')).rejects.toThrow(/permission denied/);
+  });
+
+  it('표 소유자가 슈퍼유저가 아니어도 RLS가 켜진 app_owner로 주인 확인이 동작한다', async () => {
+    await as('postgres');
+    await db.exec(`create role table_owner nologin;
+      grant usage on schema auth, private to table_owner;
+      alter table private.app_owner owner to table_owner;
+      alter function private.is_owner() owner to table_owner;`);
+    await as('authenticated', OWNER);
+    expect((await q<{ is_owner: boolean }>('select private.is_owner()'))[0].is_owner).toBe(true);
+    expect(await q('select id from public.places limit 1')).toHaveLength(1);
+    await as('authenticated', STRANGER);
+    expect((await q<{ is_owner: boolean }>('select private.is_owner()'))[0].is_owner).toBe(false);
+    await as('postgres');
+    await db.exec(`alter table private.app_owner owner to current_user; alter function private.is_owner() owner to current_user;`);
+  });
+
+  it('주인 계정을 지워도 도감 데이터가 함께 지워지지 않는다 (계정 삭제가 거부됨)', async () => {
+    await as('postgres');
+    await expect(q(`delete from auth.users where id = $1`, [OWNER])).rejects.toThrow(/foreign key/);
+    expect((await q<{ n: number }>('select count(*)::int n from public.places'))[0].n).toBeGreaterThan(0);
+  });
+
+  it('같은 이름의 버킷이 공개 상태로 있으면 설치를 멈춘다', async () => {
+    const fresh = new PGlite();
+    await fresh.exec(STUB);
+    await fresh.exec(`insert into storage.buckets (id, name, public) values ('nomad-private', 'nomad-private', true)`);
+    await expect(fresh.exec(sql())).rejects.toThrow(/공개\(public\)/);
+    await fresh.close();
+  });
+});

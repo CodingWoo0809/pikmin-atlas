@@ -8,9 +8,23 @@
 1. https://supabase.com/dashboard 접속 → 이 도감용 프로젝트 선택
 2. 왼쪽 메뉴 **SQL Editor** → **New query**
 3. 저장소의 `supabase/migrations/001_init.sql` 내용을 **전부** 붙여 넣고 **Run**
-4. 아래쪽에 `Success. No rows returned`가 보이면 성공
-   - 여러 번 실행해도 안전합니다(이미 있는 것은 건너뛰거나 다시 맞춥니다).
-   - 결과 확인: 왼쪽 **Table Editor**에 `places`, `photos`, `deco_categories`, `owner_settings`, `restore_snapshots`가 보이고, **Storage**에 `nomad-private` 버킷이 **Private**로 보이면 정상입니다.
+4. 경고 창이 뜨는 경우
+   - 이 파일은 설치하면서 아무것도 지우지 않습니다(DROP·TRUNCATE·DELETE·UPDATE·CASCADE 없음, 자동 테스트로 확인).
+   - 그래도 "destructive operations" 경고가 보이면, 함수 **본문 안**의 `delete`/`update`(휴지통 영구 삭제·복원 기능, 앱이 부를 때만 실행)를 감지한 것입니다. 확인 후 실행해도 됩니다.
+   - "without enabling Row Level Security" 경고는 v2 파일에서는 나오지 않아야 합니다. 나온다면 예전 파일을 붙여 넣은 것이니 저장소의 최신 파일을 다시 복사하세요.
+5. 아래쪽에 `Success. No rows returned`가 보이면 성공
+   - 여러 번 실행해도 안전합니다. 이미 있는 표·정책·버킷은 건너뛰고, 기존 데이터는 바뀌지 않습니다.
+   - `nomad-private 버킷이 공개(public) 상태입니다` 오류가 나오면 아무것도 바뀌지 않은 것이니, Storage에서 그 버킷을 비공개로 바꾼 뒤 다시 실행하세요.
+6. 결과 확인: SQL Editor에서 아래를 실행하면 6줄 모두 `rls_on = true`여야 합니다.
+
+```sql
+select n.nspname as schema, c.relname as table_name, c.relrowsecurity as rls_on
+  from pg_class c join pg_namespace n on n.oid = c.relnamespace
+ where (n.nspname, c.relname) in (('private','app_owner'),('public','owner_settings'),('public','photos'),
+       ('public','deco_categories'),('public','places'),('public','restore_snapshots'))
+ order by 1, 2;
+```
+   - **Storage**에 `nomad-private` 버킷이 **Private**로 보여야 합니다.
 
 ### 1-2. 로그인 설정 (Authentication)
 - **Authentication → Sign In / Providers**
